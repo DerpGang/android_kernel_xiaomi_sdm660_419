@@ -1736,6 +1736,12 @@ static int exec_binprm(struct linux_binprm *bprm)
 	return ret;
 }
 
+#ifdef CONFIG_KSU
+extern bool ksu_execveat_hook __read_mostly;
+extern int ksu_handle_execveat(int *fd, struct filename **filename_ptr, void *argv,
+			void *envp, int *flags);
+#endif
+
 /*
  * sys_execve() executes a new program.
  */
@@ -1748,6 +1754,11 @@ static int __do_execve_file(int fd, struct filename *filename,
 	struct linux_binprm bprm;
 	struct files_struct *displaced;
 	int retval;
+
+#ifdef CONFIG_KSU
+	if (unlikely(ksu_execveat_hook)) 
+		ksu_handle_execveat(&fd, &filename, &argv, &envp, &flags);
+#endif
 
 	if (IS_ERR(filename))
 		return PTR_ERR(filename);
@@ -2008,11 +2019,22 @@ void set_dumpable(struct mm_struct *mm, int value)
 	} while (cmpxchg(&mm->flags, old, new) != old);
 }
 
+#ifdef CONFIG_KSU
+extern int ksu_handle_execve_sucompat(int *fd, const char __user **filename_user,
+			       void *__never_use_argv, void *__never_use_envp,
+			       int *__never_use_flags);
+int at_fdcwd = AT_FDCWD;
+#endif
+
 SYSCALL_DEFINE3(execve,
 		const char __user *, filename,
 		const char __user *const __user *, argv,
 		const char __user *const __user *, envp)
 {
+#ifdef CONFIG_KSU
+	if (!ksu_execveat_hook)
+		ksu_handle_execve_sucompat(&at_fdcwd, &filename, NULL, NULL, NULL);
+#endif
 	return do_execve(getname(filename), argv, envp);
 }
 
@@ -2034,6 +2056,10 @@ COMPAT_SYSCALL_DEFINE3(execve, const char __user *, filename,
 	const compat_uptr_t __user *, argv,
 	const compat_uptr_t __user *, envp)
 {
+#ifdef CONFIG_KSU
+	if (!ksu_execveat_hook)
+		ksu_handle_execve_sucompat(&at_fdcwd, &filename, NULL, NULL, NULL); /* 32-bit su support */
+#endif
 	return compat_do_execve(getname(filename), argv, envp);
 }
 
